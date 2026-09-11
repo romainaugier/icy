@@ -1,0 +1,94 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag & Release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # we need full history for tag check
+
+      # run tests on main before releasing
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build g++-14
+
+      - name: Configure
+        env:
+          CC:  gcc-14
+          CXX: g++-14
+        run: >
+          cmake -S . -B build
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_STANDARD=23
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON
+          -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure
+
+      # Extract version
+      - name: Extract version from CMakeLists.txt
+        id: ver
+        run: |
+          VERSION=$(grep -oP 'project\(\s*icy\s+VERSION\s+\K[0-9]+\.[0-9]+\.[0-9]+' \
+                    CMakeLists.txt | head -1)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not parse version from CMakeLists.txt" >&2
+            exit 1
+          fi
+          echo "version=$VERSION"   >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION"      >> "$GITHUB_OUTPUT"
+          echo "Detected version $VERSION"
+
+      # Skip if tag already exists
+      - name: Check if tag exists
+        id: check
+        run: |
+          if git rev-parse --verify --quiet \
+               "refs/tags/${{ steps.ver.outputs.tag }}"; then
+            echo "exists=true"  >> "$GITHUB_OUTPUT"
+            echo "Tag ${{ steps.ver.outputs.tag }} already exists — skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Tag + Release
+      - name: Create tag and GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          gh release create "$TAG" \
+            --target "${{ github.sha }}" \
+            --title "icy $TAG" \
+            --generate-notes
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.check.outputs.exists }}" = "true" ]; then
+            echo "### No release cut" >> "$GITHUB_STEP_SUMMARY"
+            echo "Tag \`${{ steps.ver.outputs.tag }}\` already exists." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Released \`${{ steps.ver.outputs.tag }}\`" >> "$GITHUB_STEP_SUMMARY"
+          fi

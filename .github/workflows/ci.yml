@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - { name: "Linux x86_64 / GCC 13", os: ubuntu-24.04, cxx: g++-13, cc: gcc-13 }
+          - { name: "Linux x86_64 / GCC 14", os: ubuntu-24.04, cxx: g++-14, cc: gcc-14 }
+          - { name: "Linux x86_64 / Clang 17", os: ubuntu-24.04, cxx: clang++-17, cc: clang-17 }
+          - { name: "Linux x86_64 / Clang 18", os: ubuntu-24.04, cxx: clang++-18, cc: clang-18 }
+
+          # macOS
+          # macos-14 is Apple Silicon (arm64) and macos-13 is Intel (x86_64)
+          - { name: "macOS arm64 / AppleClang", os: macos-14, cxx: clang++, cc: clang }
+          - { name: "macOS x86_64 / AppleClang", os: macos-13, cxx: clang++, cc: clang }
+
+          # Windows
+          - { name: "Windows x64 / MSVC", os: windows-2022, cxx: cl, cc: cl    }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build \
+            g++-13 g++-14 \
+            clang-17 clang-18
+
+      - name: Set up MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure
+        env:
+          CC:  ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: >
+          cmake -S . -B build
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_STANDARD=23
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON
+          -DCMAKE_CXX_EXTENSIONS=OFF
+          -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure -C Release
+
+  # Separate job for MSYS2 / MinGW, needs a different shell
+  test-mingw:
+    name: Windows x64 / MinGW GCC
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_STANDARD=23
+          -DCMAKE_CXX_STANDARD_REQUIRED=ON
+          -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure
