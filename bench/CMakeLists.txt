@@ -2,8 +2,15 @@
 # Copyright (c) 2026 - Present Romain Augier
 # All rights reserved.
 
+set(TEST_LIBS icy::icy)
+
+if(MINGW)
+    list(APPEND TEST_LIBS -lstdc++exp)
+endif()
+
 add_executable(icy_bench bench.cpp)
-target_link_libraries(icy_bench PRIVATE icy::icy)
+
+target_link_libraries(icy_bench PRIVATE ${TEST_LIBS})
 
 if(MSVC)
     target_compile_options(icy_bench PRIVATE /O2 /DNDEBUG)

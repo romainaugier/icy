@@ -4,10 +4,7 @@
  
 cmake_minimum_required(VERSION 3.21)
 
-project(icy
-        VERSION 0.1.0
-        DESCRIPTION "Compile-time perfect hash map and set for C++23"
-        LANGUAGES CXX)
+project(icy VERSION 0.1.0)
 
 add_library(icy INTERFACE)
 add_library(icy::icy ALIAS icy)
