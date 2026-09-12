@@ -373,11 +373,31 @@ int main(void)
         g_sink = acc;
     };
 
+    const auto body_iter_icy_set = [&] {
+        int acc = 0;
+
+        for(const auto& v : icy_set16)
+            acc += 1;
+
+        g_sink = acc;
+    };
+
+    const auto body_iter_std_set = [&] {
+        int acc = 0;
+
+        for(const auto& v : std_set)
+            acc += 1;
+
+        g_sink = acc;
+    };
+
     const double iter_ops = 16.0 * iters;
 
     std::vector<Result> iter_results = {
         { "icy::map", measure(body_iter_icy, iters) / iter_ops },
         { "std::map", measure(body_iter_std, iters) / iter_ops },
+        { "icy::set", measure(body_iter_icy_set, iters) / iter_ops },
+        { "std::set", measure(body_iter_std_set, iters) / iter_ops },
     };
 
     print_section("Iteration (16 elements)", iter_results);
