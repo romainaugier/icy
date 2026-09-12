@@ -5,7 +5,7 @@
 set(TEST_LIBS icy::icy)
 
 if(MINGW)
-    list(APPEND TEST_LIBS -lstdc++)
+    list(APPEND TEST_LIBS -lstdc++exp)
 endif()
  
 add_executable(icy_test_map test_map.cpp)
