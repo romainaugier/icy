@@ -93,7 +93,8 @@ private:
     template <typename Container>
     consteval map(const Container& items) 
     {
-        static_assert(std::size(items) == N, "icy::map: initializer size mismatch");
+        static_assert(sizeof(items) / sizeof(items[0]) == N,
+                      "icy::map: initializer size mismatch");
 
         for(const auto& [k, v] : items) 
         {
@@ -247,7 +248,7 @@ private:
     template <typename Container>
     consteval set(const Container& items)
     {
-        static_assert(std::size(items) == N,
+        static_assert(sizeof(items) / sizeof(items[0]) == N,
                       "icy::set: initializer size mismatch");
 
         for(const auto& k : items) 
