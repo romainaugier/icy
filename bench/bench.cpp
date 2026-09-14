@@ -14,6 +14,7 @@
 //   cmake --build build --target icy_bench
 //   ./build/bench/icy_bench
 
+#define ICY_OPTIMIZE_KEY_CMP
 #include <icy.hpp>
 
 #include <algorithm>
@@ -40,6 +41,8 @@
 #if !defined(_MSC_VER)
 #include <chrono>
 #endif // !defined(_MSC_VER)
+
+#define NUM_TRIALS 32
 
 #define BENCH_NAMESPACE_BEGIN namespace bench {
 #define BENCH_NAMESPACE_END }
@@ -111,12 +114,32 @@ BENCH_NAMESPACE_END
 
 // Fixtures
 
+// constexpr std::array<std::string_view, 16> keys16 = {
+//     "alpha", "bravo", "charlie", "delta",
+//     "echo",  "foxtrot", "golf", "hotel",
+//     "india", "juliet", "kilo", "lima",
+//     "mike",  "november", "oscar", "papa",
+// };
+
 constexpr std::array<std::string_view, 16> keys16 = {
-    "alpha", "bravo", "charlie", "delta",
-    "echo",  "foxtrot", "golf", "hotel",
-    "india", "juliet", "kilo", "lima",
-    "mike",  "november", "oscar", "papa",
+    "The quick brown fox jumps over the lazy dog to demonstrate a random sequence of characters that spans exactly one hundred twent",
+    "A brilliant flash of light illuminated the dark room revealing a hidden door hidden behind the heavy velvet drapes on the wall",
+    "Quantum computing leverages the principles of superposition and entanglement to process complex data at unprecedented velocities",
+    "Microservices architecture breaks down large monolithic applications into smaller independent services communicating via standard",
+    "Artificial intelligence systems are rapidly evolving to handle complex cognitive tasks including natural language processing now",
+    "The industrial revolution marked a major turning point in human history transforming agrarian societies into industrial powerhouses",
+    "Deep space exploration requires advanced propulsion systems capable of enduring long journeys across the vast cosmic void today",
+    "Cybersecurity experts recommend implementing zero trust architectures to protect sensitive data networks from sophisticated threats",
+    "Distributed ledgers provide a decentralized and immutable record of transactions across a network of participant nodes globally",
+    "Continuous integration and continuous deployment pipelines automate the software delivery lifecycle from commit to production run",
+    "Environmental scientists emphasize the urgent need to transition to renewable energy sources to mitigate global climate change",
+    "The human genome project successfully mapped the entire sequence of chemical base pairs that make up human deoxyribonucleic acid",
+    "High-frequency trading algorithms analyze market data and execute millions of financial orders in fractions of a single millisecond",
+    "Virtual reality headsets create immersive digital environments by tracking head movements and rendering three-dimensional spaces",
+    "Autonomous vehicles utilize a combination of radar lidar and computer vision systems to safely navigate complex urban environments",
+    "The standard model of particle physics describes the fundamental forces and subatomic particles that constitute the entire universe"
 };
+
 
 constexpr auto icy_map16 = []() consteval {
     std::array<std::pair<std::string_view, int>, 16> e{};
@@ -146,7 +169,7 @@ std::uint64_t measure(Body&& body, int iters)
 
     std::uint64_t best = UINT64_MAX;
 
-    for(int trial = 0; trial < 7; ++trial)
+    for(int trial = 0; trial < NUM_TRIALS; ++trial)
     {
         const auto t0 = bench::read_cycles();
 
@@ -209,7 +232,7 @@ ANON_NAMESPACE_END
 
 int main(void)
 {
-    std::println("icy benchmark (cycle source: {})", bench::cycle_source());
+    std::println("icy benchmark (cycle source: {}, num trials: {})", bench::cycle_source(), NUM_TRIALS);
     std::println("");
 
     std::mt19937 rng(0xC0FFEE);

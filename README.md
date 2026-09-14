@@ -37,12 +37,20 @@ constexpr auto primes = icy::set<int, 5>::make({2, 3, 5, 7, 11});
 static_assert(*primes.find(7) == 7);
 ```
 
-## Build & test
+## Build & test (CMake)
 
 ```sh
-cmake -S . -B build -DCMAKE_CXX_STANDARD=23 -DBUILD_TESTING=ON
-cmake --build build
+cmake -S . -B build -DICY_BUILD_TESTS=ON
+cmake --build build --config RelWithDebInfo
 ctest --test-dir build --output-on-failure
+```
+
+## Build & benchmark (CMake)
+
+```sh
+cmake -S . -B build -DICY_BUILD_BENCH=ON
+cmake --build build --config RelWithDebInfo
+./build/bench/icy_bench
 ```
 
 ## Notes

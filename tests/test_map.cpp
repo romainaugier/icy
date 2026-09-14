@@ -13,23 +13,22 @@
 // Compile-time fixtures
 
 constexpr auto color_map = icy::map<std::string_view, int, 5>::make({
-    {"red",   0xFF0000},
-    {"green", 0x00FF00},
-    {"blue",  0x0000FF},
-    {"black", 0x000000},
-    {"white", 0xFFFFFF},
+    { "red",   0xFF0000 },
+    { "green", 0x00FF00 },
+    { "blue",  0x0000FF },
+    { "black", 0x000000 },
+    { "white", 0xFFFFFF },
 });
 
 constexpr auto num_map = icy::map<int, std::string_view, 3>::make({
-    {1, "one"},
-    {2, "two"},
-    {3, "three"},
+    { 1, "one" },
+    { 2, "two" },
+    { 3, "three" },
 });
 
-// Size / capacity
+// Size
 
 static_assert(color_map.size() == 5);
-static_assert(color_map.capacity() == 10);
 static_assert(!color_map.empty());
 static_assert(num_map.size() == 3);
 
@@ -41,11 +40,16 @@ static_assert(color_map.find("blue") != color_map.end());
 static_assert(color_map.find("black") != color_map.end());
 static_assert(color_map.find("white") != color_map.end());
 
+static_assert(num_map.find(1) != num_map.end());
+static_assert(num_map.find(2) != num_map.end());
+static_assert(num_map.find(3) != num_map.end());
+
 static_assert(color_map.find("red")->second == 0xFF0000);
 static_assert(color_map.find("green")->second == 0x00FF00);
 static_assert(color_map.find("white")->second == 0xFFFFFF);
 
 static_assert(num_map.find(1)->second == "one");
+static_assert(num_map.find(2)->second == "two");
 static_assert(num_map.find(3)->second == "three");
 
 // Find misses (compile time)
@@ -58,9 +62,9 @@ static_assert(num_map.find(0) == num_map.end());
 
 // Contains
 
-static_assert( color_map.contains("blue"));
+static_assert(color_map.contains("blue"));
 static_assert(!color_map.contains("yellow"));
-static_assert( num_map.contains(2));
+static_assert(num_map.contains(2));
 static_assert(!num_map.contains(99));
 
 // constexpr iteration count

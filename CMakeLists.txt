@@ -17,10 +17,12 @@ target_compile_features(icy INTERFACE cxx_std_23)
 
 if(PROJECT_IS_TOP_LEVEL)
     option(ICY_BUILD_BENCH "Build icy benchmarks" OFF)
+    option(ICY_BUILD_TESTS "Build icy tests" OFF)
 
     include(CTest)
 
-    if(BUILD_TESTING)
+    if(ICY_BUILD_TESTS)
+        enable_testing()
         add_subdirectory(tests)
     endif()
 
