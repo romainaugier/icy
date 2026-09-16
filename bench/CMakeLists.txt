@@ -8,24 +8,31 @@ if(MINGW)
     list(APPEND TEST_LIBS -lstdc++exp)
 endif()
 
-add_executable(icy_bench bench.cpp)
+file(GLOB_RECURSE bench_files *.cpp)
 
-target_include_directories(icy_bench PRIVATE ${CMAKE_SOURCE_DIR}/ext/robin-map/include)
+foreach(bench_src ${bench_files})
+    get_filename_component(bench_name ${bench_src} NAME_WLE)
+    message(STATUS "Added bench: ${bench_name}")
 
-target_link_libraries(icy_bench PRIVATE ${TEST_LIBS})
+    add_executable(${bench_name} bench.cpp)
 
-if(MSVC)
-    target_compile_options(icy_bench PRIVATE /O2 /DNDEBUG)
-else()
-    target_compile_options(icy_bench PRIVATE -O3 -DNDEBUG)
-endif()
+    target_include_directories(${bench_name} PRIVATE ${CMAKE_SOURCE_DIR}/ext/robin-map/include)
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    include(CheckCXXCompilerFlag)
+    target_link_libraries(${bench_name} PRIVATE ${TEST_LIBS})
 
-    check_cxx_compiler_flag(-march=native ICY_HAS_MARCH_NATIVE)
-
-    if(ICY_HAS_MARCH_NATIVE)
-        target_compile_options(icy_bench PRIVATE -march=native)
+    if(MSVC)
+        target_compile_options(${bench_name} PRIVATE /O2 /DNDEBUG)
+    else()
+        target_compile_options(${bench_name} PRIVATE -O3 -DNDEBUG)
     endif()
-endif()
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        include(CheckCXXCompilerFlag)
+
+        check_cxx_compiler_flag(-march=native ICY_HAS_MARCH_NATIVE)
+
+        if(ICY_HAS_MARCH_NATIVE)
+            target_compile_options(${bench_name} PRIVATE -march=native)
+        endif()
+    endif()
+endforeach()

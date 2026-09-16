@@ -14,14 +14,19 @@ build_dir:
 	mkdir -p build/bench
 
 # bench
- 
-bench: bench/bench.cpp build_dir
-	cc bench/bench.cpp -o build/bench/icy_bench ${INCLUDES} ${FLAGS} ${LINK} ${OPT_FLAGS}
-	chmod +x build/bench/icy_bench
+
+BENCH_SRCS := $(wildcard bench/*.cpp)
+BENCH_TARGETS := $(patsubst bench/%.cpp,build/bench/%,$(BENCH_SRCS))
+
+bench: $(BENCH_TARGETS)
+
+build/bench/%: bench/%.cpp build_dir
+	cc ${INCLUDES} ${FLAGS} ${LINK} ${OPT_FLAGS} $< -o $@
+	chmod +x $@
 
 run_bench: bench
 	echo "== bench =="
-	build/bench/icy_bench
+	@for t in $(BENCH_TARGETS); do echo "== $$t =="; $$t || exit 1; done
 
 # tests
 
