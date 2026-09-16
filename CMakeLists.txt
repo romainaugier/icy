@@ -4,7 +4,7 @@
  
 cmake_minimum_required(VERSION 3.21)
 
-project(icy VERSION 0.1.0)
+project(icy VERSION 0.2.0)
 
 add_library(icy INTERFACE)
 add_library(icy::icy ALIAS icy)
@@ -17,10 +17,18 @@ target_compile_features(icy INTERFACE cxx_std_23)
 
 if(PROJECT_IS_TOP_LEVEL)
     option(ICY_BUILD_BENCH "Build icy benchmarks" OFF)
+    option(ICY_BUILD_TESTS "Build icy tests" OFF)
+    option(ICY_BUILD_PROFILING "Build icy profiling" OFF)
 
     include(CTest)
 
-    if(BUILD_TESTING)
+    if(ICY_BUILD_TESTS)
+        if(ICY_EXHAUSTIVE_TEST_COUNT)
+            message(STATUS "Exhaustive test count set: ${ICY_EXHAUSTIVE_TEST_COUNT}")
+            add_definitions(-DICY_EXHAUSTIVE_TEST_COUNT=${ICY_EXHAUSTIVE_TEST_COUNT})
+        endif()
+
+        enable_testing()
         add_subdirectory(tests)
     endif()
 
@@ -28,4 +36,7 @@ if(PROJECT_IS_TOP_LEVEL)
         add_subdirectory(bench)
     endif()
 
+    if(ICY_BUILD_PROFILING)
+        add_subdirectory(profiling)
+    endif()
 endif()

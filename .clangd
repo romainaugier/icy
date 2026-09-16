@@ -2,3 +2,5 @@ CompileFlags:
     Add:
         - "-std=c++23"
         - "-Iinclude"
+        - "-Iext/robin-map/include"
+        - "-fconstexpr-steps=4000000000"

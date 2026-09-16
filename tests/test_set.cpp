@@ -19,10 +19,9 @@ constexpr auto keywords = icy::set<std::string_view, 6>::make({
 
 constexpr auto primes = icy::set<int, 5>::make({2, 3, 5, 7, 11});
 
-// Size / capacity
+// Size
 
 static_assert(keywords.size() == 6);
-static_assert(keywords.capacity() == 12);
 static_assert(!keywords.empty());
 static_assert(primes.size() == 5);
 
@@ -36,7 +35,18 @@ static_assert(keywords.find("return") != keywords.end());
 static_assert(keywords.find("break") != keywords.end());
 
 static_assert(*keywords.find("for") == std::string_view{"for"});
+
+static_assert(primes.find(2) != primes.end());
+static_assert(primes.find(3) != primes.end());
+static_assert(primes.find(5) != primes.end());
+static_assert(primes.find(7) != primes.end());
+static_assert(primes.find(11) != primes.end());
+
+static_assert(*primes.find(2) == 2);
+static_assert(*primes.find(3) == 3);
+static_assert(*primes.find(5) == 5);
 static_assert(*primes.find(7) == 7);
+static_assert(*primes.find(11) == 11);
 
 // find misses
 

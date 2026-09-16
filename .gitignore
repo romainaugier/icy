@@ -2,3 +2,16 @@
 
 build
 compile_flags.txt
+
+# profiling
+
+*.trace
+
+# ide
+
+.vscode
+.zed
+
+# MacOS filesystem
+
+.DS_Store
