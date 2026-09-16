@@ -353,6 +353,44 @@ struct compact_slot
 template <typename Key>
 using slot_for = std::conditional_t<std::is_integral_v<Key>, compact_slot<Key>, slot>;
 
+// Meta encoding used by icy::set slots:
+//   bit 15 (SET_META_HAS_KEY) : a key is stored in this slot
+//   bits 0-14                 : displacement code
+//                               0x0000         : no bucket here
+//                               0x0001..0x0FFE : indirect with d = code - 1
+//                               0x7FFF         : direct (key sits at bucket position)
+inline constexpr std::uint16_t SET_META_HAS_KEY = 0x8000;
+inline constexpr std::uint16_t SET_META_DISP_MASK = 0x7FFF;
+inline constexpr std::uint16_t SET_META_DISP_NONE = 0x0000;
+inline constexpr std::uint16_t SET_META_DISP_DIRECT = 0x7FFF;
+
+static_assert(ICY_MAX_DISPLACEMENT_TRIES < SET_META_DISP_DIRECT,
+              "ICY_MAX_DISPLACEMENT_TRIES must fit in 15 bits for the set's meta encoding");
+
+template <typename Key>
+struct set_slot
+{
+    Key key{};
+    index_type value_index{EMPTY};
+    std::uint16_t meta{0};
+};
+
+template <typename Key>
+struct hashed_set_slot
+{
+    Key key{};
+    std::uint64_t hash{0};
+    index_type value_index{EMPTY};
+    std::uint16_t meta{0};
+};
+
+template <typename Key>
+using set_slot_for = std::conditional_t<
+    std::is_integral_v<Key>,
+    set_slot<Key>,
+    hashed_set_slot<Key>
+>;
+
 template <typename Key, std::size_t N, std::size_t M>
 struct chd_result
 {
@@ -832,8 +870,10 @@ private:
     static constexpr std::size_t MASK = TABLE_SIZE - 1;
     static constexpr std::size_t SHIFT = 64 - std::countr_zero(TABLE_SIZE);
 
+    using slot_type = detail::set_slot_for<Key>;
+
     std::array<value_type, N> _values;
-    std::array<detail::slot_for<Key>, TABLE_SIZE> _table{};
+    std::array<slot_type, TABLE_SIZE> _table{};
     std::uint64_t _bucket_seed{0};
     std::uint64_t _bucket_seed_premix{0};
 
@@ -859,9 +899,41 @@ private:
         if(!result.valid)
             throw "icy::set: could not build a perfect hash within ICY_MAX_BUILDING_ROUNDS rounds";
 
-        this->_table = result.table;
         this->_bucket_seed = result.bucket_seed;
         this->_bucket_seed_premix = detail::premix_bucket_seed<Key>(result.bucket_seed);
+
+        for(std::size_t i = 0; i < TABLE_SIZE; ++i)
+        {
+            const auto& src = result.table[i];
+            auto& dst = this->_table[i];
+
+            std::uint16_t meta = detail::SET_META_DISP_NONE;
+
+            if(src.index != detail::EMPTY)
+            {
+                meta |= detail::SET_META_HAS_KEY;
+                dst.key = this->_values[src.index];
+                dst.value_index = src.index;
+
+                if constexpr(!std::is_integral_v<Key>)
+                    dst.hash = src.hash;
+            }
+            else
+            {
+                dst.value_index = detail::EMPTY;
+            }
+
+            if(src.displacement == detail::DIRECT)
+            {
+                meta |= detail::SET_META_DISP_DIRECT;
+            }
+            else if(src.displacement != detail::SLOT_EMPTY)
+            {
+                meta |= src.displacement;
+            }
+
+            dst.meta = meta;
+        }
     }
 
     [[nodiscard]] constexpr std::size_t find_index(const Key& key) const noexcept
@@ -872,29 +944,27 @@ private:
             detail::bucket_hash<Key>(base, this->_bucket_seed_premix), MASK, SHIFT);
 
         const auto& entry = this->_table[bucket];
+        const std::uint16_t disp = entry.meta & detail::SET_META_DISP_MASK;
 
-        if(entry.displacement == detail::SLOT_EMPTY)
+        if(disp == detail::SET_META_DISP_NONE)
             return N;
 
-        if(entry.displacement == detail::DIRECT)
+        if(disp == detail::SET_META_DISP_DIRECT)
         {
-            if(entry.index == detail::EMPTY)
-                return N;
-
             if constexpr(std::is_integral_v<Key>)
             {
-                if(this->_values[entry.index] == key)
-                    return entry.index;
+                if(entry.key == key)
+                    return entry.value_index;
             }
             else
             {
                 if(entry.hash == base)
                 {
 #if defined(ICY_OPTIMIZE_KEY_CMP)
-                    return entry.index;
+                    return entry.value_index;
 #else
-                    if(this->_values[entry.index] == key)
-                        return entry.index;
+                    if(entry.key == key)
+                        return entry.value_index;
 #endif // defined(ICY_OPTIMIZE_KEY_CMP)
                 }
             }
@@ -902,27 +972,27 @@ private:
             return N;
         }
 
-        const std::uint64_t d = static_cast<std::uint64_t>(entry.displacement) - 1;
+        const std::uint64_t d = static_cast<std::uint64_t>(disp) - 1;
         const std::uint64_t hash = detail::hash_finalize<Key>(base, d);
         const std::size_t slot_index = detail::hash_to_index<Key>(hash, MASK, SHIFT);
 
         const auto& current = this->_table[slot_index];
 
-        if(current.index == detail::EMPTY)
+        if((current.meta & detail::SET_META_HAS_KEY) == 0)
             return N;
 
         if constexpr(std::is_integral_v<Key>)
         {
-            if(this->_values[current.index] == key)
-                return current.index;
+            if(current.key == key)
+                return current.value_index;
         }
         else if(current.hash == hash)
         {
 #if defined(ICY_OPTIMIZE_KEY_CMP)
-            return current.index;
+            return current.value_index;
 #else
-            if(this->_values[current.index] == key)
-                return current.index;
+            if(current.key == key)
+                return current.value_index;
 #endif // defined(ICY_OPTIMIZE_KEY_CMP)
         }
 
