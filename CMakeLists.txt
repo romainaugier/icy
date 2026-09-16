@@ -22,6 +22,11 @@ if(PROJECT_IS_TOP_LEVEL)
     include(CTest)
 
     if(ICY_BUILD_TESTS)
+        if(ICY_EXHAUSTIVE_TEST_COUNT)
+            message(STATUS "Exhaustive test count set: ${ICY_EXHAUSTIVE_TEST_COUNT}")
+            add_definitions(-DICY_EXHAUSTIVE_TEST_COUNT=${ICY_EXHAUSTIVE_TEST_COUNT})
+        endif()
+
         enable_testing()
         add_subdirectory(tests)
     endif()

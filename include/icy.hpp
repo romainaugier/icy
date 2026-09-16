@@ -17,95 +17,125 @@
 #define ICY_MAX_BUILDING_ROUNDS 128
 #endif // !defined(ICY_MAX_BUILDING_ROUNDS)
 
+// Per-bucket displacement search bound for perfect-hash construction
+#if !defined(ICY_MAX_DISPLACEMENT_TRIES)
+#define ICY_MAX_DISPLACEMENT_TRIES 4096
+#endif // !defined(ICY_MAX_DISPLACEMENT_TRIES)
+
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 ICY_NAMESPACE_BEGIN
 
 DETAIL_NAMESPACE_BEGIN
 
-// cityhash
+// wyhash (final version 4.3), by Wang Yi <godspeed_china@yeah.net> et al.
+// https://github.com/wangyi-fudan/wyhash - released into the public domain / Unlicense
+// This is a constexpr, MSVC/GCC/Clang-portable adaptation using the default secret and a fixed external seed of 0
 
-/*
- * Copyright (c) 2011 Google, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * CityHash, by Geoff Pike and Jyrki Alakuijala.
- *
- * This is a constexpr adaptation of CityHash64 and CityHash64WithSeed.
- */
+constexpr std::uint64_t wy_secret[4] = {
+    0x2d358dccaa6c78a5ULL, 0x8bb84b93962eacc9ULL,
+    0x4b33a62ed433d4a3ULL, 0x4d5a2da51de1aa47ULL
+};
 
-constexpr std::uint64_t cityhash_k0 = 0xc3a5c85c97cb3127ULL;
-constexpr std::uint64_t cityhash_k1 = 0xb492b66fbe98f273ULL;
-constexpr std::uint64_t cityhash_k2 = 0x9ae16a3b2f90404fULL;
-
-constexpr std::uint64_t rotate(std::uint64_t value, unsigned shift) noexcept
+constexpr void wy_wymum(std::uint64_t& A, std::uint64_t& B) noexcept
 {
-    return shift == 0 ? value : (value >> shift) | (value << (64 - shift));
-}
-
-constexpr std::uint64_t shift_mix(std::uint64_t value) noexcept
-{
-    return value ^ (value >> 47);
-}
-
-constexpr std::uint64_t fetch32(const char* data) noexcept
-{
-    if consteval 
+    if consteval
     {
-        return (static_cast<std::uint64_t>(static_cast<unsigned char>(data[0])))       |
-               (static_cast<std::uint64_t>(static_cast<unsigned char>(data[1])) << 8)  |
-               (static_cast<std::uint64_t>(static_cast<unsigned char>(data[2])) << 16) |
-               (static_cast<std::uint64_t>(static_cast<unsigned char>(data[3])) << 24);
+        const std::uint64_t ha = A >> 32, hb = B >> 32;
+        const std::uint64_t la = static_cast<std::uint32_t>(A), lb = static_cast<std::uint32_t>(B);
+        const std::uint64_t rh = ha * hb, rm0 = ha * lb, rm1 = hb * la, rl = la * lb;
+        const std::uint64_t t = rl + (rm0 << 32);
+        const std::uint64_t c = t < rl;
+        const std::uint64_t lo = t + (rm1 << 32);
+        const std::uint64_t c2 = c + (lo < t);
+        const std::uint64_t hi = rh + (rm0 >> 32) + (rm1 >> 32) + c2;
+
+        A = lo; B = hi;
+    }
+    else
+    {
+#if defined(__SIZEOF_INT128__)
+        const __uint128_t r = static_cast<__uint128_t>(A) * B;
+
+        A = static_cast<std::uint64_t>(r);
+        B = static_cast<std::uint64_t>(r >> 64);
+#elif defined(_MSC_VER) && defined(_M_X64)
+        std::uint64_t hi;
+
+        A = _umul128(A, B, &hi);
+        B = hi;
+#else
+        const std::uint64_t ha = A >> 32, hb = B >> 32;
+        const std::uint64_t la = static_cast<std::uint32_t>(A), lb = static_cast<std::uint32_t>(B);
+        const std::uint64_t rh = ha * hb, rm0 = ha * lb, rm1 = hb * la, rl = la * lb;
+        const std::uint64_t t = rl + (rm0 << 32);
+        const std::uint64_t c = t < rl;
+        const std::uint64_t lo = t + (rm1 << 32);
+        const std::uint64_t c2 = c + (lo < t);
+        const std::uint64_t hi2 = rh + (rm0 >> 32) + (rm1 >> 32) + c2;
+
+        A = lo; B = hi2;
+#endif
+    }
+}
+
+constexpr std::uint64_t wy_wymix(std::uint64_t A, std::uint64_t B) noexcept
+{
+    wy_wymum(A, B);
+    return A ^ B;
+}
+
+constexpr std::uint64_t wy_wyr8(const char* p) noexcept
+{
+    if consteval
+    {
+        std::uint64_t v = 0;
+
+        for(int i = 0; i < 8; ++i)
+            v |= static_cast<std::uint64_t>(static_cast<unsigned char>(p[i])) << (8 * i);
+
+        return v;
     }
 
-    std::uint32_t value;
-    std::memcpy(std::addressof(value), data, sizeof(std::uint32_t));
-    return value;
+    std::uint64_t v;
+    std::memcpy(std::addressof(v), p, 8);
+    return v;
 }
 
-constexpr std::uint64_t fetch64(const char* data) noexcept
+constexpr std::uint64_t wy_wyr4(const char* p) noexcept
 {
-    if consteval 
+    if consteval
     {
-        return (static_cast<std::uint64_t>(static_cast<unsigned char>(data[0])))       |
-               (static_cast<std::uint64_t>(static_cast<unsigned char>(data[1])) << 8)  |
-               (static_cast<std::uint64_t>(static_cast<unsigned char>(data[2])) << 16) |
-               (static_cast<std::uint64_t>(static_cast<unsigned char>(data[3])) << 24) |
-               (static_cast<std::uint64_t>(static_cast<unsigned char>(data[4])) << 32) |
-               (static_cast<std::uint64_t>(static_cast<unsigned char>(data[5])) << 40) |
-               (static_cast<std::uint64_t>(static_cast<unsigned char>(data[6])) << 48) |
-               (static_cast<std::uint64_t>(static_cast<unsigned char>(data[7])) << 56);
+        std::uint32_t v = 0;
+
+        for(int i = 0; i < 4; ++i)
+            v |= static_cast<std::uint32_t>(static_cast<unsigned char>(p[i])) << (8 * i);
+
+        return v;
     }
 
-    std::uint64_t value;
-    std::memcpy(std::addressof(value), data, sizeof(std::uint64_t));
-    return value;
+    std::uint32_t v;
+    std::memcpy(std::addressof(v), p, 4);
+    return v;
+}
+
+constexpr std::uint64_t wy_wyr3(const char* p, std::size_t k) noexcept
+{
+    return (static_cast<std::uint64_t>(static_cast<unsigned char>(p[0])) << 16) |
+           (static_cast<std::uint64_t>(static_cast<unsigned char>(p[k >> 1])) << 8) | 
+           static_cast<unsigned char>(p[k - 1]);
 }
 
 constexpr std::uint64_t hash_len_16(std::uint64_t u, std::uint64_t v) noexcept
@@ -122,203 +152,6 @@ constexpr std::uint64_t hash_len_16(std::uint64_t u, std::uint64_t v) noexcept
     return b;
 }
 
-constexpr std::uint64_t hash_len_16(std::uint64_t u, std::uint64_t v, std::uint64_t mul) noexcept
-{
-    std::uint64_t a = (u ^ v) * mul;
-    a ^= a >> 47;
-
-    std::uint64_t b = (v ^ a) * mul;
-    b ^= b >> 47;
-    b *= mul;
-
-    return b;
-}
-
-constexpr std::uint64_t hash_len_0_to_16(const char* data, std::size_t length) noexcept
-{
-    if(length >= 8)
-    {
-        const std::uint64_t mul = cityhash_k2 + length * 2;
-        const std::uint64_t a = fetch64(data) + cityhash_k2;
-        const std::uint64_t b = fetch64(data + length - 8);
-        const std::uint64_t c = rotate(b, 37) * mul + a;
-        const std::uint64_t d = (rotate(a, 25) + b) * mul;
-
-        return hash_len_16(c, d, mul);
-    }
-
-    if(length >= 4)
-    {
-        const std::uint64_t mul = cityhash_k2 + length * 2;
-        const std::uint64_t a = fetch32(data);
-
-        return hash_len_16(length + (a << 3),
-                           fetch32(data + length - 4),
-                           mul);
-    }
-
-    if(length != 0)
-    {
-        const std::uint64_t a = static_cast<unsigned char>(data[0]);
-        const std::uint64_t b = static_cast<unsigned char>(data[length >> 1]);
-        const std::uint64_t c = static_cast<unsigned char>(data[length - 1]);
-        const std::uint64_t y = a + (b << 8);
-        const std::uint64_t z = length + (c << 2);
-
-        return shift_mix(y * cityhash_k2 ^ z * cityhash_k0) * cityhash_k2;
-    }
-
-    return cityhash_k2;
-}
-
-constexpr std::uint64_t hash_len_17_to_32(const char* data, std::size_t length) noexcept
-{
-    const std::uint64_t mul = cityhash_k2 + length * 2;
-    const std::uint64_t a = fetch64(data) * cityhash_k1;
-    const std::uint64_t b = fetch64(data + 8);
-    const std::uint64_t c = fetch64(data + length - 8) * mul;
-    const std::uint64_t d = fetch64(data + length - 16) * cityhash_k2;
-
-    return hash_len_16(rotate(a + b, 43) + rotate(c, 30) +
-                       d,
-                       a + rotate(b + cityhash_k2, 18) + c,
-                       mul);
-}
-
-struct weak_hash
-{
-    std::uint64_t first;
-    std::uint64_t second;
-};
-
-constexpr weak_hash weak_hash_len_32_with_seeds(std::uint64_t w,
-                                                std::uint64_t x,
-                                                std::uint64_t y,
-                                                std::uint64_t z,
-                                                std::uint64_t a,
-                                                std::uint64_t b) noexcept
-{
-    a += w;
-    b = rotate(b + a + z, 21);
-
-    const std::uint64_t c = a;
-
-    a += x;
-    a += y;
-
-    b += rotate(a, 44);
-
-    return { a + z, b + c };
-}
-
-constexpr weak_hash weak_hash_len_32_with_seeds(const char* data,
-                                                std::uint64_t a,
-                                                std::uint64_t b) noexcept
-{
-    return weak_hash_len_32_with_seeds(fetch64(data),
-                                       fetch64(data + 8),
-                                       fetch64(data + 16),
-                                       fetch64(data + 24),
-                                       a,
-                                       b);
-}
-
-constexpr std::uint64_t hash_len_33_to_64(const char* data, std::size_t length) noexcept
-{
-    const std::uint64_t mul = cityhash_k2 + length * 2;
-    const std::uint64_t a = fetch64(data) * cityhash_k2;
-    const std::uint64_t b = fetch64(data + 8);
-    const std::uint64_t c = fetch64(data + length - 24);
-    const std::uint64_t d = fetch64(data + length - 32);
-    const std::uint64_t e = fetch64(data + 16) * cityhash_k2;
-    const std::uint64_t f = fetch64(data + 24) * 9;
-    const std::uint64_t g = fetch64(data + length - 8);
-    const std::uint64_t h = fetch64(data + length - 16) * mul;
-    const std::uint64_t u = rotate(a + g, 43) + (rotate(b, 30) + c) * 9;
-    const std::uint64_t v = ((a + g) ^ d) + f + 1;
-    const std::uint64_t w = std::byteswap((u + v) * mul) + h;
-    const std::uint64_t x = rotate(e + f, 42) + c;
-    const std::uint64_t y = (std::byteswap((v + w) * mul) + g) * mul;
-    const std::uint64_t z = e + f + c;
-    const std::uint64_t new_a = std::byteswap((x + z) * mul + y) + b;
-    const std::uint64_t new_b = shift_mix((z + new_a) * mul + d + h) * mul;
-
-    return new_b + x;
-}
-
-constexpr std::uint64_t city_hash_64(const char* data, std::size_t length) noexcept
-{
-    if(length <= 16)
-        return hash_len_0_to_16(data, length);
-
-    if(length <= 32)
-        return hash_len_17_to_32(data, length);
-
-    if(length <= 64)
-        return hash_len_33_to_64(data, length);
-
-    std::uint64_t x = fetch64(data + length - 40);
-    std::uint64_t y = fetch64(data + length - 16) + fetch64(data + length - 56);
-    std::uint64_t z = hash_len_16(fetch64(data + length - 48) + length,fetch64(data + length - 24));
-
-    weak_hash v = weak_hash_len_32_with_seeds(data + length - 64,
-                                              length,
-                                              z);
-
-    weak_hash w = weak_hash_len_32_with_seeds(data + length - 32,
-                                              y + cityhash_k1,
-                                              x);
-
-    x = x * cityhash_k1 + fetch64(data);
-
-    length = (length - 1) & ~static_cast<std::size_t>(63);
-
-    do {
-        x = rotate(x + y + v.first + fetch64(data + 8), 37) * cityhash_k1;
-        y = rotate(y + v.second + fetch64(data + 48), 42) * cityhash_k1;
-        x ^= w.second;
-        y += v.first + fetch64(data + 40);
-        z = rotate(z + w.first, 33) * cityhash_k1;
-
-        v = weak_hash_len_32_with_seeds(data,
-                                        v.second * cityhash_k1,
-                                        x + w.first);
-
-        w = weak_hash_len_32_with_seeds(data + 32,
-                                        z + w.second,
-                                        y + fetch64(data + 16));
-
-        const std::uint64_t temporary = z;
-        z = x;
-        x = temporary;
-
-        data += 64;
-        length -= 64;
-    } while (length != 0);
-
-    return hash_len_16(hash_len_16(v.first, w.first) + shift_mix(y) * cityhash_k1 + z,
-                       hash_len_16(v.second, w.second) + x);
-}
-
-constexpr std::uint64_t city_hash_64(std::string_view data) noexcept
-{
-    return city_hash_64(data.data(), data.size());
-}
-
-constexpr std::uint64_t city_hash_64_with_seed(const char* data,
-                                               std::size_t length,
-                                               std::uint64_t seed) noexcept
-{
-    return detail::hash_len_16(detail::city_hash_64(data, length) - detail::cityhash_k2,
-                               seed);
-}
-
-constexpr std::uint64_t city_hash_64_with_seed(std::string_view data,
-                                               std::uint64_t seed) noexcept
-{
-    return city_hash_64_with_seed(data.data(), data.size(), seed);
-}
-
 constexpr std::uint64_t mix64(std::uint64_t x) noexcept
 {
     x ^= x >> 33;
@@ -330,16 +163,117 @@ constexpr std::uint64_t mix64(std::uint64_t x) noexcept
     return x;
 }
 
-template <typename Key>
-constexpr std::uint64_t hash_key(const Key& key, std::uint64_t seed) noexcept
+inline constexpr std::uint64_t wy_initial_seed = wy_wymix(wy_secret[0], wy_secret[1]);
+
+constexpr std::uint64_t wyhash_base(const char* key, std::size_t len) noexcept
 {
-    if constexpr (std::is_integral_v<Key>)
+    const char* p = key;
+    std::uint64_t seed = wy_initial_seed;
+    std::uint64_t a, b;
+
+    if(len <= 16)
     {
-        return mix64(static_cast<std::uint64_t>(key)) ^ seed;
+        if(len >= 4)
+        {
+            a = (wy_wyr4(p) << 32) | wy_wyr4(p + ((len >> 3) << 2));
+            b = (wy_wyr4(p + len - 4) << 32) | wy_wyr4(p + len - 4 - ((len >> 3) << 2));
+        }
+        else if(len > 0)
+        {
+            a = wy_wyr3(p, len);
+            b = 0;
+        }
+        else
+        {
+            a = b = 0;
+        }
     }
     else
     {
-        return city_hash_64_with_seed(key.data(), key.size(), seed);
+        std::size_t i = len;
+
+        if(i >= 48)
+        {
+            std::uint64_t see1 = seed, see2 = seed;
+
+            do {
+                seed = wy_wymix(wy_wyr8(p) ^ wy_secret[1], wy_wyr8(p + 8) ^ seed);
+                see1 = wy_wymix(wy_wyr8(p + 16) ^ wy_secret[2], wy_wyr8(p + 24) ^ see1);
+                see2 = wy_wymix(wy_wyr8(p + 32) ^ wy_secret[3], wy_wyr8(p + 40) ^ see2);
+                p += 48;
+                i -= 48;
+            } while(i >= 48);
+
+            seed ^= see1 ^ see2;
+        }
+
+        while(i > 16)
+        {
+            seed = wy_wymix(wy_wyr8(p) ^ wy_secret[1], wy_wyr8(p + 8) ^ seed);
+            i -= 16;
+            p += 16;
+        }
+
+        a = wy_wyr8(p + i - 16);
+        b = wy_wyr8(p + i - 8);
+    }
+
+    a ^= wy_secret[1];
+    b ^= seed;
+    wy_wymum(a, b);
+
+    return wy_wymix(a ^ wy_secret[0] ^ len, b ^ wy_secret[1]);
+}
+
+template <typename Key>
+constexpr std::uint64_t hash_key_base(const Key& key) noexcept
+{
+    if constexpr (std::is_integral_v<Key>)
+    {
+        return static_cast<std::uint64_t>(key);
+    }
+    else
+    {
+        return wyhash_base(key.data(), key.size());
+    }
+}
+
+template <typename Key>
+constexpr std::uint64_t hash_finalize(std::uint64_t base, std::uint64_t seed) noexcept
+{
+    if constexpr (std::is_integral_v<Key>)
+    {
+        return mix64(base ^ mix64(seed));
+    }
+    else
+    {
+        return hash_len_16(base, seed);
+    }
+}
+
+template <typename Key>
+constexpr std::uint64_t bucket_hash(std::uint64_t base, std::uint64_t seed) noexcept
+{
+    if constexpr (std::is_integral_v<Key>)
+    {
+        return mix64(base ^ mix64(seed));
+    }
+    else
+    {
+        return mix64(base ^ (seed * 0x9E3779B97F4A7C15ull));
+    }
+}
+
+template <typename Key>
+constexpr std::size_t hash_to_index(std::uint64_t hash, std::size_t mask, std::size_t shift) noexcept
+{
+    if constexpr (std::is_integral_v<Key>)
+    {
+        return static_cast<std::size_t>(hash >> shift);
+    }
+    else
+    {
+        return static_cast<std::size_t>(hash) & mask;
     }
 }
 
@@ -360,12 +294,235 @@ constexpr std::size_t next_pow2(std::size_t n) noexcept
     return n + 1;
 }
 
+template <typename Key>
 constexpr std::size_t table_size_for(std::size_t n) noexcept
 {
-    if(n <= 1)
+    if(n == 0)
         return 1;
 
-    return next_pow2(n * 4);
+    if constexpr(std::is_integral_v<Key>)
+    {
+        constexpr std::size_t INTEGRAL_LOW_LOAD_FACTOR_MAX_N = 8192;
+
+        if(n <= INTEGRAL_LOW_LOAD_FACTOR_MAX_N)
+            return next_pow2(n * 6 + 1);
+
+        return next_pow2(n + n / 4 + 1);
+    }
+    else
+        return next_pow2(n + n / 4 + 1);
+}
+
+using index_type = std::uint32_t;
+
+inline constexpr std::uint32_t EMPTY = std::numeric_limits<std::uint32_t>::max();
+
+static_assert(ICY_MAX_DISPLACEMENT_TRIES <= std::numeric_limits<std::uint16_t>::max(),
+              "ICY_MAX_DISPLACEMENT_TRIES must fit in 16 bits (displacement is stored as uint16_t)");
+
+inline constexpr std::uint16_t DIRECT = std::numeric_limits<std::uint16_t>::max();
+
+inline constexpr std::uint64_t DIRECT_SEED = static_cast<std::uint64_t>(DIRECT);
+
+struct slot
+{
+    std::uint64_t hash{0};
+    index_type index{EMPTY};
+    std::uint16_t displacement{DIRECT};
+};
+
+static_assert(sizeof(slot) == 16, "sizeof(slot) must be 16 bytes (index + hash + displacement, padded)");
+
+template <typename Key>
+struct compact_slot
+{
+    Key key{};
+    index_type index{EMPTY};
+    std::uint16_t displacement{DIRECT};
+};
+
+template <typename Key>
+using slot_for = std::conditional_t<std::is_integral_v<Key>, compact_slot<Key>, slot>;
+
+template <typename Key, std::size_t N, std::size_t M>
+struct chd_result
+{
+    std::array<slot_for<Key>, M> table{};
+    std::uint64_t bucket_seed{0};
+    bool valid{false};
+};
+
+template <typename Key, std::size_t N, std::size_t M>
+consteval chd_result<Key, N, M> build_perfect_hash(const std::array<Key, N>& keys)
+{
+    static_assert(M > 0 && (M & (M - 1)) == 0, "M must be a power of two");
+
+    constexpr std::size_t MASK = M - 1;
+    constexpr std::size_t SHIFT = 64 - std::countr_zero(M);
+
+    std::array<std::uint64_t, N> key_base{};
+
+    for(std::size_t i = 0; i < N; ++i)
+        key_base[i] = hash_key_base(keys[i]);
+
+    for(std::size_t round = 0; round < ICY_MAX_BUILDING_ROUNDS; ++round)
+    {
+        const std::uint64_t bucket_seed = static_cast<std::uint64_t>(round);
+
+        std::array<std::size_t, N> bucket_of{};
+        std::array<std::size_t, M> bucket_count{};
+
+        for(std::size_t i = 0; i < N; ++i)
+        {
+            const std::size_t b = hash_to_index<Key>(bucket_hash<Key>(key_base[i], bucket_seed), MASK, SHIFT);
+            bucket_of[i] = b;
+            ++bucket_count[b];
+        }
+
+        std::array<std::size_t, M + 1> bucket_offset{};
+
+        for(std::size_t b = 0; b < M; ++b)
+            bucket_offset[b + 1] = bucket_offset[b] + bucket_count[b];
+
+        std::array<std::size_t, M> cursor{};
+
+        for(std::size_t b = 0; b < M; ++b)
+            cursor[b] = bucket_offset[b];
+
+        std::array<std::size_t, N> sorted_indices{};
+
+        for(std::size_t i = 0; i < N; ++i)
+            sorted_indices[cursor[bucket_of[i]]++] = i;
+
+        std::array<std::size_t, M> bucket_order{};
+
+        for(std::size_t b = 0; b < M; ++b)
+            bucket_order[b] = b;
+
+        std::sort(bucket_order.begin(), bucket_order.end(),
+                  [&](std::size_t a, std::size_t b) noexcept
+                  {
+                      if(bucket_count[a] != bucket_count[b])
+                          return bucket_count[a] > bucket_count[b];
+
+                      return a < b;
+                  });
+
+        chd_result<Key, N, M> candidate{};
+
+        candidate.bucket_seed = bucket_seed;
+
+        bool duplicate = false;
+        bool round_ok = true;
+
+        for(std::size_t bi = 0; bi < M && round_ok; ++bi)
+        {
+            const std::size_t b = bucket_order[bi];
+            const std::size_t count = bucket_count[b];
+
+            if(count == 0)
+                break;
+
+            const std::size_t off = bucket_offset[b];
+
+            for(std::size_t j = 0; j < count && !duplicate; ++j)
+                for(std::size_t k = j + 1; k < count; ++k)
+                    if(keys[sorted_indices[off + j]] == keys[sorted_indices[off + k]])
+                    {
+                        duplicate = true;
+                        break;
+                    }
+
+            if(duplicate)
+                break;
+
+            bool placed = false;
+
+            if(count == 1 && candidate.table[b].index == EMPTY)
+            {
+                const std::size_t idx = sorted_indices[off];
+
+                candidate.table[b].index = static_cast<index_type>(idx);
+
+                if constexpr(std::is_integral_v<Key>)
+                    candidate.table[b].key = keys[idx];
+                else
+                    candidate.table[b].hash = hash_finalize<Key>(key_base[idx], DIRECT_SEED);
+                candidate.table[b].displacement = DIRECT;
+
+                placed = true;
+            }
+
+            for(std::size_t d = 0; d < ICY_MAX_DISPLACEMENT_TRIES && !placed; ++d)
+            {
+                std::vector<std::size_t> slots(count);
+                std::vector<std::uint64_t> hashes(count);
+
+                bool collision = false;
+
+                for(std::size_t j = 0; j < count; ++j)
+                {
+                    const std::uint64_t h = hash_finalize<Key>(key_base[sorted_indices[off + j]], static_cast<std::uint64_t>(d));
+                    const std::size_t s = hash_to_index<Key>(h, MASK, SHIFT);
+
+                    hashes[j] = h;
+                    slots[j] = s;
+
+                    for(std::size_t k = 0; k < j; ++k)
+                    {
+                        if(slots[k] == s)
+                        {
+                            collision = true;
+                            break;
+                        }
+                    }
+
+                    if(collision)
+                        break;
+
+                    if(candidate.table[s].index != EMPTY)
+                    {
+                        collision = true;
+                        break;
+                    }
+                }
+
+                if(collision)
+                    continue;
+
+                for(std::size_t j = 0; j < count; ++j)
+                {
+                    const std::size_t idx = sorted_indices[off + j];
+
+                    candidate.table[slots[j]].index = static_cast<index_type>(idx);
+
+                    if constexpr(std::is_integral_v<Key>)
+                        candidate.table[slots[j]].key = keys[idx];
+                    else
+                        candidate.table[slots[j]].hash = hashes[j];
+                }
+
+                candidate.table[b].displacement = static_cast<std::uint16_t>(d);
+
+                placed = true;
+            }
+
+            if(!placed)
+                round_ok = false;
+        }
+
+        if(duplicate)
+            throw "icy: duplicate key in initializer";
+
+        if(!round_ok)
+            continue;
+
+        candidate.valid = true;
+
+        return candidate;
+    }
+
+    return chd_result<Key, N, M>{};
 }
 
 DETAIL_NAMESPACE_END
@@ -393,35 +550,15 @@ public:
     using pointer = const value_type*;
 
 private:
-    static constexpr std::size_t TABLE_SIZE = detail::table_size_for(N);
+    static constexpr std::size_t TABLE_SIZE = detail::table_size_for<Key>(N);
     static constexpr std::size_t MASK = TABLE_SIZE - 1;
-    static constexpr std::uint32_t EMPTY = std::numeric_limits<std::uint32_t>::max();
-
-    using index_type = std::size_t;
-
-    struct slot
-    {
-        index_type index{EMPTY};
-        std::uint64_t hash{0};
-    };
-
-    static_assert(sizeof(slot) == 16, "sizeof(slot) must be 16 bytes");
+    static constexpr std::size_t SHIFT = 64 - std::countr_zero(TABLE_SIZE);
 
     std::array<value_type, N> _values;
-    std::array<slot, TABLE_SIZE> _table{};
-    std::uint64_t _seed{0};
+    std::array<detail::slot_for<Key>, TABLE_SIZE> _table{};
 
-    struct build_result
-    {
-        std::array<slot, TABLE_SIZE> table{};
-
-        std::uint64_t seed{0};
-
-        std::size_t total_probes{0};
-        std::size_t max_probe{0};
-
-        bool valid{false};
-    };
+    std::uint64_t _bucket_seed{0};
+    std::uint64_t _bucket_seed_premix{0};
 
     template <typename Container>
     static consteval std::array<value_type, N> make_values(const Container& items)
@@ -434,78 +571,16 @@ private:
         return values;
     }
 
+
     template <typename Container>
-    static consteval build_result build(const Container& items)
+    static consteval std::array<Key, N> make_keys(const Container& items)
     {
-        build_result best{};
+        std::array<Key, N> keys{};
 
-        for(std::size_t round = 0;
-            round < ICY_MAX_BUILDING_ROUNDS;
-            ++round)
-        {
-            build_result candidate{};
+        for(std::size_t i = 0; i < N; ++i)
+            keys[i] = items[i].first;
 
-            candidate.seed = static_cast<std::uint64_t>(round);
-
-            bool collision = false;
-            bool duplicate = false;
-
-            for(std::size_t value_index = 0;
-                value_index < N;
-                ++value_index)
-            {
-                const auto& key = items[value_index].first;
-
-                const std::uint64_t hash = detail::hash_key(key, candidate.seed);
-
-                std::size_t idx = hash & MASK;
-                std::size_t probes = 0;
-
-                while(candidate.table[idx].index != EMPTY)
-                {
-                    if(candidate.table[idx].hash == hash)
-                    {
-                        const std::size_t existing_index = candidate.table[idx].index;
-
-                        if(items[existing_index].first == key)
-                            duplicate = true;
-
-                        collision = true;
-
-                        break;
-                    }
-
-                    idx = (idx + 1) & MASK;
-                    ++probes;
-                }
-
-                if(collision)
-                    break;
-
-                candidate.table[idx].index = static_cast<index_type>(value_index);
-                candidate.table[idx].hash = hash;
-
-                candidate.total_probes += probes;
-
-                if(probes > candidate.max_probe)
-                    candidate.max_probe = probes;
-            }
-
-            if(duplicate)
-                throw "icy::map: duplicate key in initializer";
-
-            candidate.valid = true;
-
-            if(!best.valid ||
-               candidate.max_probe < best.max_probe ||
-               (candidate.max_probe == best.max_probe &&
-                candidate.total_probes < best.total_probes))
-            {
-                best = candidate;
-            }
-        }
-
-        return best;
+        return keys;
     }
 
     template <typename Container>
@@ -514,44 +589,90 @@ private:
         static_assert(sizeof(items) / sizeof(items[0]) == N,
                       "icy::map: initializer size mismatch");
 
-        const build_result result = build(items);
+        const auto result = detail::build_perfect_hash<Key, N, TABLE_SIZE>(make_keys(items));
+
+        if(!result.valid)
+            throw "icy::map: could not build a perfect hash within ICY_MAX_BUILDING_ROUNDS rounds";
 
         this->_table = result.table;
-        this->_seed = result.seed;
+        this->_bucket_seed = result.bucket_seed;
+        this->_bucket_seed_premix = detail::mix64(result.bucket_seed);
     }
 
     [[nodiscard]] constexpr std::size_t find_index(const Key& key) const noexcept
     {
-        const std::uint64_t hash = detail::hash_key(key, this->_seed);
+        const std::uint64_t base = detail::hash_key_base(key);
 
-        std::size_t idx = hash & MASK;
+        const std::size_t bucket = detail::hash_to_index<Key>(detail::bucket_hash<Key>(base, this->_bucket_seed), MASK, SHIFT);
 
-        while(this->_table[idx].index != EMPTY)
+        const auto& entry = this->_table[bucket];
+
+        if(entry.displacement == detail::DIRECT)
         {
-            const slot& current = this->_table[idx];
+            if(entry.index == detail::EMPTY)
+                return N;
 
-            if(current.hash == hash)
+            if constexpr(std::is_integral_v<Key>)
             {
-                const std::size_t value_index = current.index;
-
+                if(entry.key == key)
+                    return entry.index;
+            }
+            else
+            {
+                if(entry.hash == detail::hash_finalize<Key>(base, detail::DIRECT_SEED))
+                {
 #if defined(ICY_OPTIMIZE_KEY_CMP)
-                return value_index;
+                    return entry.index;
 #else
-                if(this->_values[value_index].first == key)
-                    return value_index;
+                    if(this->_values[entry.index].first == key)
+                        return entry.index;
 #endif // defined(ICY_OPTIMIZE_KEY_CMP)
+                }
             }
 
-            idx = (idx + 1) & MASK;
+            return N;
+        }
+
+        const std::uint64_t hash = detail::hash_finalize<Key>(base, static_cast<std::uint64_t>(entry.displacement));
+        const std::size_t slot_index = detail::hash_to_index<Key>(hash, MASK, SHIFT);
+
+        const auto& current = this->_table[slot_index];
+
+        if(current.index == detail::EMPTY)
+            return N;
+
+        if constexpr(std::is_integral_v<Key>)
+        {
+            if(current.key == key)
+                return current.index;
+        }
+        else if(current.hash == hash)
+        {
+#if defined(ICY_OPTIMIZE_KEY_CMP)
+            return current.index;
+#else
+            if(this->_values[current.index].first == key)
+                return current.index;
+#endif // defined(ICY_OPTIMIZE_KEY_CMP)
         }
 
         return N;
     }
 
 public:
-    static consteval map make(const std::pair<Key, Value>(&items)[N])
+    static consteval map make(std::initializer_list<std::pair<Key, Value>> items)
     {
-        return map(items);
+        if(items.size() != N)
+            throw "icy::map: initializer has a different number of entries than N";
+
+        std::array<std::pair<Key, Value>, N> array{};
+
+        std::size_t i = 0;
+
+        for(const auto& item : items)
+            array[i++] = item;
+
+        return map(array);
     }
 
     static consteval map make(const std::array<std::pair<Key, Value>, N>& items)
@@ -695,35 +816,14 @@ public:
     using pointer = const value_type*;
 
 private:
-    static constexpr std::size_t TABLE_SIZE = detail::table_size_for(N);
+    static constexpr std::size_t TABLE_SIZE = detail::table_size_for<Key>(N);
     static constexpr std::size_t MASK = TABLE_SIZE - 1;
-    static constexpr std::uint32_t EMPTY = std::numeric_limits<std::uint32_t>::max();
-
-    using index_type = std::size_t;
-
-    struct slot
-    {
-        index_type index{EMPTY};
-        std::uint64_t hash{0};
-    };
-
-    static_assert(sizeof(slot) == 16, "sizeof(slot) must be 16 bytes");
+    static constexpr std::size_t SHIFT = 64 - std::countr_zero(TABLE_SIZE);
 
     std::array<value_type, N> _values;
-    std::array<slot, TABLE_SIZE> _table{};
-    std::uint64_t _seed{0};
-
-    struct build_result
-    {
-        std::array<slot, TABLE_SIZE> table{};
-
-        std::uint64_t seed{0};
-
-        std::size_t total_probes{0};
-        std::size_t max_probe{0};
-
-        bool valid{false};
-    };
+    std::array<detail::slot_for<Key>, TABLE_SIZE> _table{};
+    std::uint64_t _bucket_seed{0};
+    std::uint64_t _bucket_seed_premix{0};
 
     template <typename Container>
     static consteval std::array<value_type, N> make_values(const Container& items)
@@ -737,125 +837,95 @@ private:
     }
 
     template <typename Container>
-    static consteval build_result build(const Container& items)
-    {
-        build_result best{};
-
-        for(std::size_t round = 0; round < ICY_MAX_BUILDING_ROUNDS; ++round)
-        {
-            build_result candidate{};
-
-            candidate.seed = static_cast<std::uint64_t>(round);
-
-            bool collision = false;
-            bool duplicate = false;
-
-            for(std::size_t value_index = 0; value_index < N; ++value_index)
-            {
-                const auto& key = items[value_index];
-
-                const std::uint64_t hash = detail::hash_key(key, candidate.seed);
-
-                std::size_t idx = hash & MASK;
-                std::size_t probes = 0;
-
-                while(candidate.table[idx].index != EMPTY)
-                {
-                    if(candidate.table[idx].hash == hash)
-                    {
-                        const std::size_t existing_index = candidate.table[idx].index;
-
-                        if(items[existing_index] == key)
-                            duplicate = true;
-
-                        collision = true;
-
-                        break;
-                    }
-
-                    idx = (idx + 1) & MASK;
-                    ++probes;
-                }
-
-                if(collision)
-                    break;
-
-                candidate.table[idx].index = static_cast<index_type>(value_index);
-                candidate.table[idx].hash = hash;
-
-                candidate.total_probes += probes;
-
-                if(probes > candidate.max_probe)
-                    candidate.max_probe = probes;
-            }
-
-            if(duplicate)
-                throw "icy::set: duplicate key in initializer";
-
-            if(collision)
-                continue;
-
-            candidate.valid = true;
-
-            if(!best.valid ||
-               candidate.max_probe < best.max_probe ||
-               (candidate.max_probe == best.max_probe &&
-                candidate.total_probes < best.total_probes))
-            {
-                best = candidate;
-            }
-        }
-
-        return best;
-    }
-
-    template <typename Container>
     consteval set(const Container& items) : _values(make_values(items))
     {
         static_assert(sizeof(items) / sizeof(items[0]) == N,
                       "icy::set: initializer size mismatch");
 
-        const build_result result = build(items);
+        const auto result = detail::build_perfect_hash<Key, N, TABLE_SIZE>(this->_values);
 
         if(!result.valid)
-            throw "icy::set: could not find a collision-free table within ICY_MAX_BUILDING_ROUNDS rounds";
+            throw "icy::set: could not build a perfect hash within ICY_MAX_BUILDING_ROUNDS rounds";
 
         this->_table = result.table;
-        this->_seed = result.seed;
+        this->_bucket_seed = result.bucket_seed;
+        this->_bucket_seed_premix = detail::mix64(result.bucket_seed);
     }
 
     [[nodiscard]] constexpr std::size_t find_index(const Key& key) const noexcept
     {
-        const std::uint64_t hash = detail::hash_key(key, this->_seed);
+        const std::uint64_t base = detail::hash_key_base(key);
 
-        std::size_t idx = hash & MASK;
+        const std::size_t bucket = detail::hash_to_index<Key>(detail::bucket_hash<Key>(base, this->_bucket_seed), MASK, SHIFT);
 
-        while(this->_table[idx].index != EMPTY)
+        const auto& entry = this->_table[bucket];
+
+        if(entry.displacement == detail::DIRECT)
         {
-            const slot& current = this->_table[idx];
+            if(entry.index == detail::EMPTY)
+                return N;
 
-            if(current.hash == hash)
+            if constexpr(std::is_integral_v<Key>)
             {
-                const std::size_t value_index = current.index;
-
+                if(entry.key == key)
+                    return entry.index;
+            }
+            else
+            {
+                if(entry.hash == detail::hash_finalize<Key>(base, detail::DIRECT_SEED))
+                {
 #if defined(ICY_OPTIMIZE_KEY_CMP)
-                return value_index;
+                    return entry.index;
 #else
-                if(this->_values[value_index] == key)
-                    return value_index;
+                    if(this->_values[entry.index] == key)
+                        return entry.index;
 #endif // defined(ICY_OPTIMIZE_KEY_CMP)
+                }
             }
 
-            idx = (idx + 1) & MASK;
+            return N;
+        }
+
+        const std::uint64_t hash = detail::hash_finalize<Key>(base, static_cast<std::uint64_t>(entry.displacement));
+        const std::size_t slot_index = detail::hash_to_index<Key>(hash, MASK, SHIFT);
+
+        const auto& current = this->_table[slot_index];
+
+        if(current.index == detail::EMPTY)
+            return N;
+
+        if constexpr(std::is_integral_v<Key>)
+        {
+            if(current.key == key)
+                return current.index;
+        }
+        else if(current.hash == hash)
+        {
+#if defined(ICY_OPTIMIZE_KEY_CMP)
+            return current.index;
+#else
+            if(this->_values[current.index] == key)
+                return current.index;
+#endif // defined(ICY_OPTIMIZE_KEY_CMP)
         }
 
         return N;
     }
 
 public:
-    static consteval set make(const Key(&items)[N])
+    static consteval set make(std::initializer_list<Key> items)
     {
-        return set(items);
+        if(items.size() != N)
+            throw "icy::set: initializer has a different number of entries than N";
+
+        std::array<Key, N> array{};
+
+        std::size_t i = 0;
+
+        for(const auto& item : items)
+            array[i++] = item;
+
+        return set(array);
     }
 
     static consteval set make_array(const std::array<Key, N>& items)

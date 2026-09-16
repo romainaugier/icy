@@ -13,14 +13,15 @@
 #include <string_view>
 
 #if !defined(ICY_EXHAUSTIVE_TEST_COUNT)
-#define ICY_EXHAUSTIVE_TEST_COUNT (1ULL << 30)
+#define ICY_EXHAUSTIVE_TEST_COUNT (1ULL << 32)
 #endif // !defined(ICY_EXHAUSTIVE_TEST_COUNT)
 
 constexpr auto keywords = icy::set<std::string_view, 64>::make({
-    "d",
+    "",
     "a",
     "b",
     "c",
+    "d",
     "aa",
     "ab",
     "ba",

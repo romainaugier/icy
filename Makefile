@@ -2,9 +2,9 @@
 # Copyright (c) 2026 - Present Romain Augier
 # All rights reserved.
 
-INCLUDES=-Iinclude
+INCLUDES=-Iinclude -Iext/robin-map/include
 LINK=-lstdc++
-FLAGS=-std=c++23
+FLAGS=-std=c++23 -fconstexpr-steps=4000000000
 OPT_FLAGS=-O3 -march=native
 
 # build

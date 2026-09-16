@@ -10,6 +10,8 @@ endif()
 
 add_executable(icy_bench bench.cpp)
 
+target_include_directories(icy_bench PRIVATE ${CMAKE_SOURCE_DIR}/ext/robin-map/include)
+
 target_link_libraries(icy_bench PRIVATE ${TEST_LIBS})
 
 if(MSVC)
