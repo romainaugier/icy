@@ -4,7 +4,7 @@
  
 cmake_minimum_required(VERSION 3.21)
 
-project(icy VERSION 0.1.0)
+project(icy VERSION 0.2.0)
 
 add_library(icy INTERFACE)
 add_library(icy::icy ALIAS icy)
