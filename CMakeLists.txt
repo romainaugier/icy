@@ -18,6 +18,7 @@ target_compile_features(icy INTERFACE cxx_std_23)
 if(PROJECT_IS_TOP_LEVEL)
     option(ICY_BUILD_BENCH "Build icy benchmarks" OFF)
     option(ICY_BUILD_TESTS "Build icy tests" OFF)
+    option(ICY_BUILD_PROFILING "Build icy profiling" OFF)
 
     include(CTest)
 
@@ -35,4 +36,7 @@ if(PROJECT_IS_TOP_LEVEL)
         add_subdirectory(bench)
     endif()
 
+    if(ICY_BUILD_PROFILING)
+        add_subdirectory(profiling)
+    endif()
 endif()

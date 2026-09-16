@@ -12,6 +12,7 @@ build_dir:
 	mkdir -p build
 	mkdir -p build/tests
 	mkdir -p build/bench
+	mkdir -p build/profiling
 
 # bench
 
@@ -42,9 +43,16 @@ run_tests: tests
 	echo "== tests =="
 	@for t in $(TEST_TARGETS); do echo "== $$t =="; $$t || exit 1; done
 
+# profiling
+
+PROFILING_FLAGS=-O3 -march=native -g3
+
+profiling : profiling/profiling.cpp build_dir
+	cc ${INCLUDES} ${FLAGS} ${PROFILING_FLAGS} ${LINK} profiling/profiling.cpp -o build/profiling/profiling
+
 clean:
 	rm -rf build
 
-all: bench tests
+all: bench tests profiling
 
 .PHONY: all bench run_bench tests run_tests clean

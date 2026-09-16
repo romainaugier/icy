@@ -87,7 +87,7 @@ constexpr void wy_wymum(std::uint64_t& A, std::uint64_t& B) noexcept
         const std::uint64_t hi2 = rh + (rm0 >> 32) + (rm1 >> 32) + c2;
 
         A = lo; B = hi2;
-#endif
+#endif // defined(__SIZEOF_INT128__)
     }
 }
 
@@ -318,7 +318,7 @@ constexpr std::size_t table_size_for(std::size_t n) noexcept
         if(n <= 64)
             return next_pow2(n * 16 + 1);
 
-        return next_pow2(n * 2 + 1);
+        return next_pow2(n * 4 + 1);
     }
     else
     {

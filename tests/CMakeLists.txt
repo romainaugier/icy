@@ -17,5 +17,21 @@ foreach(test_src ${test_files})
     add_executable(${test_name} ${test_src})
     target_link_libraries(${test_name} PRIVATE ${TEST_LIBS})
 
+    if(MSVC)
+        target_compile_options(${bench_name} PRIVATE /O2 /DNDEBUG)
+    else()
+        target_compile_options(${bench_name} PRIVATE -O3 -DNDEBUG)
+    endif()
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        include(CheckCXXCompilerFlag)
+
+        check_cxx_compiler_flag(-march=native ICY_HAS_MARCH_NATIVE)
+
+        if(ICY_HAS_MARCH_NATIVE)
+            target_compile_options(${bench_name} PRIVATE -march=native)
+        endif()
+    endif()
+
     add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
 endforeach()
